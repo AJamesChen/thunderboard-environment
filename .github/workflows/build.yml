@@ -1,0 +1,30 @@
+name: Android and protocol checks
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Firmware value conversion tests
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -I firmware firmware/tests/test_values.c -o /tmp/bg22-test-values
+          /tmp/bg22-test-values
+      - name: Portable Android protocol tests
+        run: |
+          python3 tests/make_protocol_fixture.py /tmp/parser-fixture.bg22ota
+          mkdir -p /tmp/bg22-tests
+          javac --release 17 -d /tmp/bg22-tests android/app/src/main/java/com/jamesc/bg22monitor/SensorCodec.java android/app/src/main/java/com/jamesc/bg22monitor/OtaImage.java android/tests/ProtocolTest.java
+          java -ea -cp /tmp/bg22-tests ProtocolTest /tmp/parser-fixture.bg22ota
+      - name: Build APK and run Android lint
+        working-directory: android
+        run: ./gradlew --no-daemon assembleDebug lintDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BG22-Monitor-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk

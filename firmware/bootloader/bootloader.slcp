@@ -1,0 +1,27 @@
+project_name: bg22_bootloader
+package: bootloader
+label: BG22 internal storage bootloader
+description: Stores one application update in a 192 KiB internal flash slot.
+quality: development
+component:
+  - id: brd4184a
+  - id: brd4184a_a02
+  - id: bootloader_core
+  - id: bootloader_crc
+  - id: bootloader_aes_sha_ecdsa
+  - id: bootloader_internal_storage
+  - id: bootloader_storage_slots
+  - id: bootloader_image_parser
+  - id: bootloader_common_storage
+  - id: bootloader_token_management
+configuration:
+  - name: SLOT0_ENABLE
+    value: "1"
+  - name: SLOT0_START
+    value: "278528"
+  - name: SLOT0_SIZE
+    value: "196608"
+  - name: BTL_STORAGE_BASE_ADDRESS
+    value: "278528"
+post_build:
+  profile: bootloader_series_2

@@ -1,0 +1,163 @@
+# Thunderboard Environment
+
+A Silicon Labs Thunderboard BG22 environment monitor with a native Android app.
+The onboard Si7021 measures temperature and relative humidity; Bluetooth LE
+carries live readings and application firmware updates. No account, server, or
+Internet permission is required by the app.
+
+Target board: **BRD4184A revision A02 / EFR32BG22C224F512IM40**.
+The app supports Android 12 and later, including Pixel 7 and Pixel 7 Pro.
+
+**Current status:** sensor firmware and desktop BLE reads/notifications are
+verified. The Android APK builds, passes lint, installs, and discovers the board.
+OTA is experimental: interrupted-upload recovery passes, but full desktop
+uploads still fail intermittently with ATT error `0x0e`. Complete phone reads and
+OTA confirmation remain unverified after USB debugging authorization was lost.
+Use USB provisioning for dependable firmware installation until this is resolved.
+
+## Use the Android app
+
+1. Build or install `BG22 Monitor` using the instructions below.
+2. Allow **Nearby Devices** access and turn on Bluetooth.
+3. Disconnect the desktop and other BLE apps from the board.
+4. Tap **Scan for sensors**, then **BG22 Environment**.
+5. Temperature and humidity update automatically every two seconds.
+   **Read now** requests fresh cached values once.
+
+Pairing through Android's system Bluetooth screen is not required. The board
+supports one client at a time. Keep the app open during monitoring and updates;
+background collection and notifications outside the app are not implemented.
+
+## Update the board over Bluetooth
+
+This workflow is implemented for testing; see the current-status limitation above.
+
+The board first needs the supplied bootloader and OTA-enabled application
+installed once over USB. An original sensor image linked at address zero cannot
+receive these updates.
+
+1. Build a new firmware version, for example `python3 firmware/build.py --version 3`.
+2. Copy `firmware/artifacts/firmware-3.bg22ota` to the phone's Downloads folder.
+3. Connect to the board in BG22 Monitor and tap **Choose update file**.
+4. Select the package, tap **Update firmware**, and confirm.
+5. Keep the app open and the board powered while it transfers, verifies,
+   installs, and reconnects. Success is shown only after the reported firmware
+   version matches the selected package.
+
+The app validates the board ID, version metadata, SHA-256, GBL CRC, image size,
+and application flash range. It uses acknowledged writes, one at a time, with
+chunks sized for the negotiated MTU. The bootloader stages a complete image
+before installation. An interrupted upload can be restarted from the beginning;
+it is not resumed from an offset.
+
+This is development OTA: images are unsigned and BLE access is unencrypted.
+Checksums detect corruption and do not authenticate the publisher. Bootloader,
+secure-engine, compressed, and encrypted GBL updates are excluded from this app.
+
+## Build and install Android
+
+Requirements: JDK 17 or 21, Android SDK platform 34, and build tools 34.0.0.
+Set `ANDROID_HOME` to your SDK, or configure `android/local.properties` with
+`sdk.dir=/path/to/Android/Sdk`.
+
+```bash
+cd android
+./gradlew --no-daemon assembleDebug lintDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+The APK is a debug-signed personal development build. Source uses the platform
+Android APIs without third-party runtime libraries. Gradle 8.14.3 and Android
+Gradle Plugin 8.6.1 are pinned in the build configuration.
+
+## Build and provision firmware
+
+Install Simplicity Studio 6, Simplicity SDK **2026.6.2**, SLC CLI **6.0.25**,
+GNU Arm **14.2.rel1**, CMake, Ninja, and Simplicity Commander using Simplicity
+Installer. The build script resolves their locations through
+`~/.silabs/tools.json`.
+
+```bash
+python3 firmware/build.py --version 2
+commander flash firmware/artifacts/bootstrap-2.hex --serialno <debugger-serial>
+```
+
+A new SLC installation may need
+`slc signature trust --sdk <installed-sdk-path>` for the SDK installed by Silicon
+Labs. The build never flashes hardware automatically.
+
+Build products:
+
+| File | Purpose |
+| --- | --- |
+| `bootstrap-N.hex` | USB installation of matching bootloader and application |
+| `firmware-N.gbl` | Uncompressed application GBL for Silicon Labs OTA tooling |
+| `firmware-N.bg22ota` | Validated package selected in BG22 Monitor |
+
+These files are generated under `firmware/artifacts/` and excluded from Git.
+Keep a backup of the board before first provisioning.
+
+## Layout and protocol
+
+- `android/`: native Android UI, BLE operation queue, sensor decoder, OTA parser.
+- `firmware/`: C sensor application and SLC project.
+- `firmware/bootloader/`: internal-storage Gecko bootloader project.
+- `firmware/tests/`: native value conversion and Linux hardware OTA tests.
+- `android/tests/`: portable Java protocol tests.
+
+| Flash region | Address range, end exclusive |
+| --- | --- |
+| Bootloader reservation | `0x00000–0x06000` |
+| Application area | `0x06000–0x44000` |
+| 192 KiB update slot | `0x44000–0x74000` |
+
+The build rejects application images that overlap the bootloader or update slot.
+
+| GATT value | UUID | Encoding |
+| --- | --- | --- |
+| Environmental Sensing service | `181A` | Standard Bluetooth service |
+| Temperature | `2A6E` | Signed little-endian 16-bit / 100, degrees C |
+| Humidity | `2A6F` | Unsigned little-endian 16-bit / 100, %RH |
+| Firmware revision | `2A26` | Decimal application version as UTF-8 |
+
+OTA uses Silicon Labs' application-based OTA service. A control write of `00`
+starts transfer, acknowledged data writes stage the GBL, and `03` finishes it.
+Disconnect triggers verification; the application then asks the bootloader to
+install the verified image and reboot.
+
+Serial diagnostics use **115200 baud, 8N1, no flow control**. Firmware operation
+does not depend on a serial monitor being open.
+Sensor conversions are paused during OTA so blocking I2C measurements do not
+compete with Bluetooth/flash handling. Sampling resumes after recovery or reboot.
+
+## Verification
+
+See [firmware/VALIDATION.md](firmware/VALIDATION.md) for hardware results and
+remaining limitations. Android lint and APK signature verification are part of
+the local validation.
+
+To test a generated update package with the portable Java tests:
+
+```bash
+mkdir -p /tmp/bg22-tests
+javac --release 17 -d /tmp/bg22-tests android/app/src/main/java/com/jamesc/bg22monitor/SensorCodec.java android/app/src/main/java/com/jamesc/bg22monitor/OtaImage.java android/tests/ProtocolTest.java
+java -ea -cp /tmp/bg22-tests ProtocolTest firmware/artifacts/firmware-3.bg22ota
+gcc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -I firmware firmware/tests/test_values.c -o /tmp/bg22-test-values
+/tmp/bg22-test-values
+```
+
+The Linux OTA hardware test requires `python3-dbus`, `python3-gi`, an enabled
+Bluetooth adapter, and an unoccupied board. It installs the supplied image:
+
+```bash
+python3 firmware/tests/ota_smoke.py firmware/artifacts/firmware-3.bg22ota
+```
+
+Add `--interrupt-after 4096` to check that an interrupted transfer preserves
+the currently installed firmware.
+
+## References
+
+- [Thunderboard BRD4184A hardware guide](https://www.silabs.com/documents/public/user-guides/ug415-brd4184a-user-guide.pdf)
+- [Silicon Labs OTA architecture](https://docs.silabs.com/bluetooth/10.1.2/using-gecko-bootloader-with-bluetooth-apps/03-bluetooth-ota-upgrade)
+- [Android BLE data transfer](https://developer.android.com/develop/connectivity/bluetooth/ble/transfer-ble-data)

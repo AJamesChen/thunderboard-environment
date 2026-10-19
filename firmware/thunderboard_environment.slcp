@@ -1,0 +1,64 @@
+project_name: thunderboard_environment
+package: bluetooth_le_app
+label: Thunderboard temperature and humidity
+description: Si7021 readings over the Bluetooth Environmental Sensing Service.
+category: Bluetooth Examples
+quality: development
+
+component:
+  - id: brd4184a
+  - id: brd4184a_a02
+  - id: sl_main
+  - id: app_os_helper
+  - id: bluetooth_stack
+  - id: bluetooth_feature_legacy_advertiser
+  - id: bluetooth_feature_connection_role_peripheral
+  - id: bluetooth_feature_gatt_server
+  - id: bluetooth_feature_system
+  - id: gatt_configuration
+  - id: app_ota_dfu
+  - id: sensor_rht
+  - id: i2cspm
+    instance: [sensor]
+  - id: app_timer
+  - id: app_assert
+  - id: app_log
+  - id: iostream_usart
+    instance: [vcom]
+  - id: printf
+  - id: mpu
+  - id: clock_manager
+  - id: device_init
+
+source:
+  - path: app.c
+include:
+  - path: .
+    file_list:
+      - path: app.h
+      - path: environment_values.h
+config_file:
+  - override:
+      component: gatt_configuration
+      file_id: gatt_configuration_file_id
+    path: gatt_configuration.btconf
+    directory: btconf
+configuration:
+  - name: SL_APPLICATION_VERSION
+    value: "2"
+  - name: SL_APPLICATION_PRODUCT_ID
+    value: '"BG22ENV-BRD4184A"'
+  - name: SL_STACK_SIZE
+    value: "2752"
+  - name: SL_BT_CONFIG_MAX_CONNECTIONS
+    value: "1"
+  - name: SL_BOARD_ENABLE_VCOM
+    value: "1"
+  - name: SL_BOARD_ENABLE_SENSOR_RHT
+    value: "1"
+  - name: SL_IOSTREAM_USART_VCOM_RESTRICT_ENERGY_MODE_TO_ALLOW_RECEPTION
+    value: "0"
+  - name: SL_IOSTREAM_USART_VCOM_FLOW_CONTROL_TYPE
+    value: "usartHwFlowControlNone"
+  - name: APP_LOG_NEW_LINE
+    value: "APP_LOG_NEW_LINE_RN"

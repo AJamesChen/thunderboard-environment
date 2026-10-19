@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project>
+  <gatt generic_attribute_service="true" header="gatt_db.h" name="Thunderboard Environment" out="gatt_db.c" prefix="gattdb_">
+    <service advertise="false" name="Generic Access" type="primary" uuid="1800">
+      <characteristic id="device_name" name="Device Name" uuid="2A00">
+        <value length="16" type="utf-8" variable_length="false">BG22 Environment</value>
+        <properties read="true" const="true"/>
+      </characteristic>
+      <characteristic name="Appearance" uuid="2A01">
+        <value length="2" type="hex" variable_length="false">0000</value>
+        <properties read="true" const="true"/>
+      </characteristic>
+    </service>
+    <service advertise="false" name="Device Information" type="primary" uuid="180A">
+      <characteristic id="firmware_version" name="Firmware Revision String" uuid="2A26">
+        <value length="16" type="user" variable_length="true"/>
+        <properties read="true"/>
+      </characteristic>
+    </service>
+    <service advertise="true" id="environmental_sensing" name="Environmental Sensing" type="primary" uuid="181A">
+      <characteristic id="temperature" name="Temperature" uuid="2A6E">
+        <value length="2" type="user" variable_length="false"/>
+        <properties read="true" notify="true"/>
+        <descriptor name="Characteristic Presentation Format" uuid="2904">
+          <value length="7" type="hex" variable_length="false">0EFE2F27010000</value>
+          <properties read="true" const="true"/>
+        </descriptor>
+      </characteristic>
+      <characteristic id="humidity" name="Humidity" uuid="2A6F">
+        <value length="2" type="user" variable_length="false"/>
+        <properties read="true" notify="true"/>
+        <descriptor name="Characteristic Presentation Format" uuid="2904">
+          <value length="7" type="hex" variable_length="false">06FEAD27010000</value>
+          <properties read="true" const="true"/>
+        </descriptor>
+      </characteristic>
+    </service>
+  </gatt>
+</project>
