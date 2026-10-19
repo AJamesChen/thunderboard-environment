@@ -15,7 +15,7 @@ PROJECT = Path(__file__).resolve().parent
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--version", type=int, default=2, help="application firmware version (default: 2)")
+    parser.add_argument("--version", type=int, default=4, help="application firmware version (default: 4)")
     args = parser.parse_args()
     if not 1 <= args.version <= 0xffffffff:
         parser.error("version must fit an unsigned 32-bit integer")

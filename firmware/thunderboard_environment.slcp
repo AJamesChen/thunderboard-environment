@@ -37,6 +37,7 @@ include:
     file_list:
       - path: app.h
       - path: environment_values.h
+      - path: reporting_period.h
 config_file:
   - override:
       component: gatt_configuration
@@ -45,7 +46,7 @@ config_file:
     directory: btconf
 configuration:
   - name: SL_APPLICATION_VERSION
-    value: "2"
+    value: "4"
   - name: SL_APPLICATION_PRODUCT_ID
     value: '"BG22ENV-BRD4184A"'
   - name: SL_STACK_SIZE

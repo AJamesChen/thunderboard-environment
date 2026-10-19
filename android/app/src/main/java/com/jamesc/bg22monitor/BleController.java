@@ -22,6 +22,8 @@ public final class BleController {
     static final UUID OTA = uuid("1d14d6ee-fd63-4fa1-bfa4-8f47b42119f0");
     static final UUID CONTROL = uuid("f7bf3564-fb6d-4e53-88a4-5e37e0326063");
     static final UUID DATA = uuid("984227f3-34fc-4045-a5d0-2c581f81a153");
+    static final UUID SETTINGS = uuid("f2b90001-4e7d-4eaf-a5bf-1d23c7aa0001");
+    static final UUID PERIOD = uuid("f2b90002-4e7d-4eaf-a5bf-1d23c7aa0001");
 
     public interface Listener {
         void message(String text);
@@ -30,6 +32,7 @@ public final class BleController {
         void connection(boolean ready, boolean otaAvailable, String version);
         void reading(boolean temperature, double value);
         void otaProgress(boolean active, int percent, String text);
+        void reportingPeriod(boolean available, int seconds);
     }
     private enum Kind { MTU, DISCOVER, READ, DESCRIPTOR, WRITE }
     private static final class Op {
@@ -52,7 +55,7 @@ public final class BleController {
     private int mtu=23, offset, reconnectAttempts;
     private String version="Unknown";
     private OtaImage image;
-    private BluetoothGattCharacteristic temperature, humidity, revision, control, data;
+    private BluetoothGattCharacteristic temperature, humidity, revision, control, data, period;
     private final Runnable scanTimeout = this::stopScan;
 
     public BleController(Context context, Listener listener) {
@@ -121,7 +124,8 @@ public final class BleController {
     private void releaseGatt() {
         cancelOperations(); ready=false;
         if (gatt != null) { BluetoothGatt old=gatt; gatt=null; old.disconnect(); old.close(); }
-        temperature=null; humidity=null; revision=null; control=null; data=null;
+        temperature=null; humidity=null; revision=null; control=null; data=null; period=null;
+        listener.reportingPeriod(false, 2);
     }
     public void close() { closed=true; disconnect(); main.removeCallbacksAndMessages(null); }
 
@@ -180,12 +184,15 @@ public final class BleController {
     private void setup() {
         temperature=find(ENV, TEMP); humidity=find(ENV, HUMID); revision=find(INFO, VERSION);
         control=find(OTA, CONTROL); data=find(OTA, DATA);
+        period=find(SETTINGS, PERIOD);
         if (temperature == null || humidity == null) { fail("This device does not provide temperature and humidity."); return; }
         read(temperature); read(humidity);
         subscribe(temperature); subscribe(humidity);
         if (revision != null) enqueue(new Op(Kind.READ, revision, null, null, bytes -> {
             version=new String(bytes, StandardCharsets.UTF_8).trim();
         }));
+        if (period != null) readPeriod();
+        else listener.reportingPeriod(false, 2);
         // A queued read provides a final barrier after CCC writes/version read.
         enqueue(new Op(Kind.READ, temperature, null, null, bytes -> {
             receive(temperature, bytes); ready=true;
@@ -197,7 +204,7 @@ public final class BleController {
                 reconnecting=false; updating=false; image=null;
                 listener.otaProgress(false, 100, "Update verified. Firmware " + version + " is running.");
             }
-            listener.message("Connected. Live readings update every two seconds.");
+            listener.message("Connected. Live readings follow the board's reporting period.");
         }));
     }
     private void read(BluetoothGattCharacteristic c) {
@@ -210,6 +217,22 @@ public final class BleController {
         } catch (IllegalArgumentException e) { listener.message(e.getMessage()); }
     }
     public void refresh() { if (ready && !isUpdating()) { read(temperature); read(humidity); } }
+    private void readPeriod() {
+        enqueue(new Op(Kind.READ, period, null, null, bytes -> {
+            try { listener.reportingPeriod(true, SensorCodec.decodePeriodSeconds(bytes)); }
+            catch (IllegalArgumentException e) { fail(e.getMessage()); }
+        }));
+    }
+    public void setReportingPeriod(int seconds) {
+        if (!ready || isUpdating() || period == null) return;
+        byte[] value;
+        try { value=SensorCodec.encodePeriodSeconds(seconds); }
+        catch (IllegalArgumentException e) { listener.message(e.getMessage()); return; }
+        if (current != null || !queue.isEmpty()) {
+            listener.message("Wait for the current read or setting change to finish, then apply again."); return;
+        }
+        enqueue(new Op(Kind.WRITE, period, null, value, ignored -> readPeriod()));
+    }
     private void subscribe(BluetoothGattCharacteristic c) {
         if ((c.getProperties() & BluetoothGattCharacteristic.PROPERTY_NOTIFY) == 0) return;
         BluetoothGattDescriptor ccc=c.getDescriptor(CCC);

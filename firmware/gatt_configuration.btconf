@@ -35,5 +35,11 @@
         </descriptor>
       </characteristic>
     </service>
+    <service advertise="false" name="Reporting Settings" type="primary" uuid="F2B90001-4E7D-4EAF-A5BF-1D23C7AA0001">
+      <characteristic id="reporting_period" name="Reporting Period" uuid="F2B90002-4E7D-4EAF-A5BF-1D23C7AA0001">
+        <value length="4" type="user" variable_length="false"/>
+        <properties read="true" write="true"/>
+      </characteristic>
+    </service>
   </gatt>
 </project>

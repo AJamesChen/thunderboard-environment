@@ -11,6 +11,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.*;
+import android.text.InputType;
 import android.provider.OpenableColumns;
 import android.view.*;
 import android.widget.*;
@@ -27,12 +28,15 @@ public final class MainActivity extends Activity implements BleController.Listen
     private final Map<String, Button> deviceButtons=new LinkedHashMap<>();
     private BleController ble;
     private LinearLayout devices;
-    private TextView status, temperature, humidity, updated, firmware, packageInfo, otaStatus;
-    private Button scan, disconnect, refresh, choose, install;
+    private TextView status, temperature, humidity, updated, firmware, packageInfo, otaStatus, periodStatus;
+    private Button scan, disconnect, refresh, choose, install, applyPeriod;
+    private EditText periodInput;
     private ProgressBar progress;
     private OtaImage selected;
     private boolean ready, otaAvailable, loadingFile, destroyed, scanning;
     private long temperatureTime, humidityTime;
+    private boolean periodAvailable;
+    private int periodSeconds=2;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -86,6 +90,22 @@ public final class MainActivity extends Activity implements BleController.Listen
         left.addView(label("degrees Celsius",12,ACCENT)); right.addView(label("% relative humidity",12,ACCENT)); readings.addView(row);
         updated=label("Connect to see live readings",12,MUTED); readings.addView(updated);
         refresh=button("Read now",false); refresh.setEnabled(false); refresh.setOnClickListener(v -> ble.refresh()); readings.addView(refresh);
+        readings.addView(label("Update period",16,TEXT));
+        periodStatus=label("Connect to read the board's current period",12,MUTED); readings.addView(periodStatus);
+        periodInput=new EditText(this); periodInput.setInputType(InputType.TYPE_CLASS_NUMBER);
+        periodInput.setSingleLine(true); periodInput.setText("2"); periodInput.setTextColor(TEXT);
+        periodInput.setHint("Seconds (1–3600)"); periodInput.setHintTextColor(MUTED);
+        periodInput.setContentDescription("Temperature and humidity update period in seconds");
+        periodInput.setEnabled(false); readings.addView(periodInput);
+        applyPeriod=button("Apply period",false); applyPeriod.setEnabled(false); readings.addView(applyPeriod);
+        applyPeriod.setOnClickListener(v -> {
+            try {
+                int seconds=Integer.parseInt(periodInput.getText().toString().trim());
+                SensorCodec.encodePeriodSeconds(seconds);
+                periodInput.setError(null); ble.setReportingPeriod(seconds);
+            } catch (IllegalArgumentException e) { periodInput.setError("Enter a whole number from 1 to 3600 seconds"); }
+        });
+        readings.addView(label("Applies to both sensors. A board restart restores the 2-second default.",12,MUTED));
 
         LinearLayout ota=card(root); ota.addView(label("Firmware update",19,TEXT));
         firmware=label("Board firmware · not connected",13,MUTED); ota.addView(firmware);
@@ -103,7 +123,7 @@ public final class MainActivity extends Activity implements BleController.Listen
         progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal); progress.setMax(100);
         progress.setProgressTintList(ColorStateList.valueOf(ACCENT)); ota.addView(progress,new LinearLayout.LayoutParams(-1,dp(12)));
         otaStatus=label("Connect to check OTA support.",13,MUTED); otaStatus.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE); ota.addView(otaStatus);
-        root.addView(label("Onboard Si7021  ·  Updates every 2 seconds\nReadings stay on your phone. No account required.",12,MUTED));
+        root.addView(label("Onboard Si7021  ·  Adjustable reporting period\nReadings stay on your phone. No account required.",12,MUTED));
         setContentView(scroll);
     }
 
@@ -153,6 +173,8 @@ public final class MainActivity extends Activity implements BleController.Listen
     private void updateButtons() {
         boolean busy=ble!=null && ble.isUpdating();
         scan.setEnabled(!busy); disconnect.setEnabled(ready && !busy); refresh.setEnabled(ready && !busy);
+        applyPeriod.setEnabled(ready && periodAvailable && !busy);
+        periodInput.setEnabled(ready && periodAvailable && !busy);
         choose.setEnabled(!busy && !loadingFile); install.setEnabled(ready && otaAvailable && selected!=null && !busy && !loadingFile);
         for (Button b:deviceButtons.values()) b.setEnabled(!busy);
         if (busy) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -178,6 +200,7 @@ public final class MainActivity extends Activity implements BleController.Listen
     }
     @Override public void connection(boolean connected,boolean supportsOta,String version) {
         ready=connected; otaAvailable=supportsOta;
+        if (connected && !periodAvailable) periodStatus.setText("This firmware does not support period changes. Install firmware 4 or newer.");
         firmware.setText(connected ? "Board firmware · " + version : "Board firmware · disconnected");
         if (!ble.isUpdating()) otaStatus.setText(connected ? supportsOta ? "Experimental OTA available. Choose a .bg22ota file to test an update." : "Monitoring ready. Install the OTA bootloader and firmware once over USB to enable updates." : "Connect to check OTA support.");
         updateButtons();
@@ -185,6 +208,15 @@ public final class MainActivity extends Activity implements BleController.Listen
     @Override public void reading(boolean isTemperature,double value) {
         if (isTemperature) { temperature.setText(String.format(Locale.getDefault(),"%.2f°",value)); temperatureTime=SystemClock.elapsedRealtime(); }
         else { humidity.setText(String.format(Locale.getDefault(),"%.2f%%",value)); humidityTime=SystemClock.elapsedRealtime(); }
+    }
+    @Override public void reportingPeriod(boolean available,int seconds) {
+        periodAvailable=available; periodSeconds=seconds;
+        periodInput.setText(Integer.toString(seconds));
+        periodInput.setError(null);
+        periodStatus.setText(available ? "Board reports every " + seconds + (seconds==1 ? " second" : " seconds")
+            : ready ? "This firmware does not support period changes. Install firmware 4 or newer."
+            : "Connect to read the board's current period");
+        updateButtons();
     }
     @Override public void otaProgress(boolean active,int percent,String text) {
         progress.setProgress(percent); otaStatus.setText(text); updateButtons();
@@ -196,7 +228,8 @@ public final class MainActivity extends Activity implements BleController.Listen
             else if (temperatureTime==0 || humidityTime==0) updated.setText("Waiting for both sensors…");
             else {
                 long seconds=(SystemClock.elapsedRealtime()-Math.min(temperatureTime,humidityTime))/1000;
-                updated.setText(seconds>10 ? "No fresh reading for " + seconds + " seconds" : "Live · updated " + seconds + "s ago");
+                updated.setText(seconds*1000L>SensorCodec.staleAfterMillis(periodSeconds)
+                    ? "No fresh reading for " + seconds + " seconds" : "Live · updated " + seconds + "s ago");
             }
             handler.postDelayed(this,1000);
         }

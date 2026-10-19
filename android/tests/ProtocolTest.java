@@ -36,6 +36,21 @@ public final class ProtocolTest {
         assert Math.abs(SensorCodec.humidity(new byte[]{0x48,0x10})-41.68)<0.0001;
         try { SensorCodec.humidity(new byte[]{(byte)0xff,(byte)0xff}); throw new AssertionError(); }
         catch (IllegalArgumentException expected) { }
+
+        assert Arrays.equals(SensorCodec.encodePeriodSeconds(5),new byte[]{(byte)0x88,0x13,0,0});
+        for (int seconds:new int[]{1,2,5,60,3600})
+            assert SensorCodec.decodePeriodSeconds(SensorCodec.encodePeriodSeconds(seconds))==seconds;
+        for (int invalid:new int[]{0,-1,3601,Integer.MAX_VALUE}) {
+            try { SensorCodec.encodePeriodSeconds(invalid); throw new AssertionError(); }
+            catch (IllegalArgumentException expected) { }
+        }
+        for (byte[] invalid:new byte[][]{new byte[0],new byte[3],new byte[5],new byte[]{1,0,0,0},new byte[]{(byte)0xff,(byte)0xff,(byte)0xff,(byte)0xff}}) {
+            try { SensorCodec.decodePeriodSeconds(invalid); throw new AssertionError(); }
+            catch (IllegalArgumentException expected) { }
+        }
+        assert SensorCodec.staleAfterMillis(2)==10000;
+        assert SensorCodec.staleAfterMillis(60)==122000;
+        assert SensorCodec.staleAfterMillis(3600)==7202000;
         try { SensorCodec.temperature(new byte[]{1}); throw new AssertionError(); }
         catch (IllegalArgumentException expected) { }
 

@@ -13,12 +13,15 @@
 #include "environment_values.h"
 #include "sl_bt_app_ota_dfu.h"
 #include "app_properties_config.h"
+#include "reporting_period.h"
 
 #define NO_CONNECTION 0xff
-#define SAMPLE_PERIOD_MS 2000
 #define ATT_UNLIKELY_ERROR 0x0e
 #define ATT_ATTRIBUTE_NOT_FOUND 0x0a
 #define ATT_INVALID_OFFSET 0x07
+#define ATT_INVALID_VALUE_LENGTH 0x0d
+#define ATT_VALUE_NOT_ALLOWED 0x13
+#define ATT_REQUEST_NOT_SUPPORTED 0x06
 
 static uint8_t advertising_set = 0xff;
 static uint8_t connection = NO_CONNECTION;
@@ -29,6 +32,7 @@ static bool sample_valid;
 static uint8_t temperature_value[2];
 static uint8_t humidity_value[2];
 static app_timer_t sample_timer;
+static uint32_t sample_period_ms = REPORTING_PERIOD_DEFAULT_MS;
 static bool ota_restart_pending;
 static bool ota_active;
 
@@ -142,7 +146,7 @@ void sl_bt_on_event(sl_bt_msg_t *evt)
     case sl_bt_evt_system_boot_id:
       app_log_info("Thunderboard environment monitor started\r\n");
       sample_environment(NULL, NULL);
-      status = app_timer_start(&sample_timer, SAMPLE_PERIOD_MS,
+      status = app_timer_start(&sample_timer, sample_period_ms,
                                sample_environment, NULL, true);
       app_assert_status(status);
       status = sl_bt_advertiser_create_set(&advertising_set);
@@ -192,6 +196,7 @@ void sl_bt_on_event(sl_bt_msg_t *evt)
         &evt->data.evt_gatt_server_user_read_request;
       const uint8_t *value = NULL;
       uint16_t length = 2;
+      uint8_t period_value[4];
       char version[16];
       uint8_t error = 0;
       if (event->characteristic == gattdb_temperature) {
@@ -202,10 +207,15 @@ void sl_bt_on_event(sl_bt_msg_t *evt)
         length = (uint16_t)snprintf(version, sizeof(version), "%lu",
                                     (unsigned long)SL_APPLICATION_VERSION);
         value = (const uint8_t *)version;
+      } else if (event->characteristic == gattdb_reporting_period) {
+        reporting_period_encode(sample_period_ms, period_value);
+        length = sizeof(period_value);
+        value = period_value;
       }
       if (value == NULL) {
         error = ATT_ATTRIBUTE_NOT_FOUND;
-      } else if (!sample_valid && event->characteristic != gattdb_firmware_version) {
+      } else if (!sample_valid && (event->characteristic == gattdb_temperature
+                                  || event->characteristic == gattdb_humidity)) {
         /* Do not present an old sample as a successful current reading. */
         error = ATT_UNLIKELY_ERROR;
       } else if (event->offset > length) {
@@ -216,6 +226,52 @@ void sl_bt_on_event(sl_bt_msg_t *evt)
         event->connection, event->characteristic, error,
         error ? 0 : length - event->offset,
         error ? NULL : value + event->offset, &sent);
+      app_assert_status(status);
+      break;
+    }
+
+    case sl_bt_evt_gatt_server_user_write_request_id: {
+      const sl_bt_evt_gatt_server_user_write_request_t *event =
+        &evt->data.evt_gatt_server_user_write_request;
+      /* OTA characteristics are owned by the SDK's separate event handler. */
+      if (event->characteristic != gattdb_reporting_period
+          || event->att_opcode == sl_bt_gatt_write_command) {
+        break;
+      }
+      if (event->att_opcode == sl_bt_gatt_prepare_write_request) {
+        status = sl_bt_gatt_server_send_user_prepare_write_response(
+          event->connection, event->characteristic, ATT_REQUEST_NOT_SUPPORTED,
+          event->offset, 0, NULL);
+        app_assert_status(status);
+        break;
+      }
+      uint32_t requested_ms;
+      uint8_t error = 0;
+      if (event->att_opcode != sl_bt_gatt_write_request) {
+        error = ATT_REQUEST_NOT_SUPPORTED;
+      } else if (event->offset != 0) {
+        error = ATT_INVALID_OFFSET;
+      } else if (event->value.len != 4) {
+        error = ATT_INVALID_VALUE_LENGTH;
+      } else if (ota_active || !reporting_period_decode(event->value.data,
+                                                       event->value.len, &requested_ms)) {
+        error = ATT_VALUE_NOT_ALLOWED;
+      } else if (requested_ms != sample_period_ms) {
+        status = app_timer_start(&sample_timer, requested_ms,
+                                 sample_environment, NULL, true);
+        if (status == SL_STATUS_OK) {
+          sample_period_ms = requested_ms;
+          app_log_info("Reporting period=%lu ms\r\n", (unsigned long)sample_period_ms);
+        } else {
+          error = ATT_UNLIKELY_ERROR;
+          /* Restore the last valid schedule if restarting the timer failed. */
+          status = app_timer_start(&sample_timer, sample_period_ms,
+                                   sample_environment, NULL, true);
+          app_assert_status(status);
+        }
+      }
+      status = sl_bt_gatt_server_send_user_write_response(
+        event->connection, event->characteristic, error);
       app_assert_status(status);
       break;
     }

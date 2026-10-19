@@ -29,6 +29,27 @@
   firmware version 2. After reconnect, temperature was 27.59 C and humidity was
   44.80 %RH. The serial monitor was closed for this test.
 
+## Configurable reporting period (firmware 4 / Android 1.1)
+
+- C and Java tests cover little-endian period encoding, 1/3,600-second bounds,
+  invalid lengths, values outside the range, fractional seconds, and the
+  interval-aware stale-reading threshold.
+- Firmware 4 build, USB flash verification, Android 1.1 build/lint, APK signature
+  verification, and installation on the connected Pixel passed.
+- BlueZ measured temperature notification gaps of 1.030/0.997 seconds and
+  humidity gaps of 0.989/0.997 seconds with a 1-second setting.
+- At 3 seconds, temperature gaps were 2.974/3.058 seconds and humidity gaps were
+  3.157/2.876 seconds. These are host-observed timings, including BLE and dispatch jitter.
+- 1-second and 3,600-second boundary settings were accepted. Zero, below-minimum,
+  fractional-second, above-maximum, overflow, and short writes were rejected
+  without changing the accepted setting.
+- The 5-second setting survived disconnect/reconnect. The test restored 2 seconds.
+- The Pixel app connected, displayed both sensor readings, and applied a 5-second
+  period with acknowledged write and BLE readback confirmation. Applying 2 seconds
+  restored the default and was also confirmed by readback.
+- Settings are intentionally volatile: reconnect retains them; reboot uses the
+  2-second default. No flash persistence is implemented.
+
 ## Unresolved / not passed
 
 - Full BlueZ OTA uploads fail intermittently with ATT error 0x0e. Failures have
@@ -38,9 +59,7 @@
 - UART RTS/CTS was disabled to remove a possible serial-monitor dependency.
   Blocking sensor conversions are now paused during OTA. The full-transfer
   failure still requires diagnosis; these changes are not claimed as a complete fix.
-- Android sensor reads, notifications, and complete phone OTA installation remain
-  unverified. ADB authorization changed to unauthorized after app discovery;
-  further phone automation requires accepting the USB debugging prompt again.
+- Complete phone OTA installation remains unverified.
 - Sensor failure recovery has not been fault-injected. Battery life, firmware
   power-loss recovery during installation, and Android background operation have
   not been validated. There is no background collection service.
