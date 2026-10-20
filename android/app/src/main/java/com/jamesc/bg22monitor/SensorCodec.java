@@ -3,6 +3,10 @@ package com.jamesc.bg22monitor;
 /** Standard Bluetooth Environmental Sensing values are little endian. */
 public final class SensorCodec {
     private SensorCodec() {}
+    /** Optional standard Battery Level, or -1 when no usable percentage was supplied. */
+    public static int batteryLevel(byte[] value) {
+        return value != null && value.length == 1 && (value[0] & 255) <= 100 ? value[0] & 255 : -1;
+    }
     public static double temperature(byte[] value) {
         requireTwoBytes(value);
         return (short)((value[0] & 255) | (value[1] & 255) << 8) / 100.0;

@@ -19,6 +19,7 @@ public final class BleController {
     static UUID standard(String value) { return uuid("0000" + value + "-0000-1000-8000-00805f9b34fb"); }
     static final UUID ENV = standard("181a"), TEMP = standard("2a6e"), HUMID = standard("2a6f");
     static final UUID INFO = standard("180a"), VERSION = standard("2a26"), CCC = standard("2902");
+    static final UUID BATTERY = standard("180f"), BATTERY_LEVEL = standard("2a19");
     static final UUID OTA = uuid("1d14d6ee-fd63-4fa1-bfa4-8f47b42119f0");
     static final UUID CONTROL = uuid("f7bf3564-fb6d-4e53-88a4-5e37e0326063");
     static final UUID DATA = uuid("984227f3-34fc-4045-a5d0-2c581f81a153");
@@ -33,6 +34,7 @@ public final class BleController {
         void reading(boolean temperature, double value);
         void otaProgress(boolean active, int percent, String text);
         void reportingPeriod(boolean available, int seconds);
+        void battery(int percent);
     }
     private enum Kind { MTU, DISCOVER, READ, DESCRIPTOR, WRITE }
     private static final class Op {
@@ -55,7 +57,7 @@ public final class BleController {
     private int mtu=23, offset, reconnectAttempts;
     private String version="Unknown";
     private OtaImage image;
-    private BluetoothGattCharacteristic temperature, humidity, revision, control, data, period;
+    private BluetoothGattCharacteristic temperature, humidity, revision, control, data, period, battery;
     private final Runnable scanTimeout = this::stopScan;
 
     public BleController(Context context, Listener listener) {
@@ -124,7 +126,8 @@ public final class BleController {
     private void releaseGatt() {
         cancelOperations(); ready=false;
         if (gatt != null) { BluetoothGatt old=gatt; gatt=null; old.disconnect(); old.close(); }
-        temperature=null; humidity=null; revision=null; control=null; data=null; period=null;
+        temperature=null; humidity=null; revision=null; control=null; data=null; period=null; battery=null;
+        listener.battery(-1);
         listener.reportingPeriod(false, 2);
     }
     public void close() { closed=true; disconnect(); main.removeCallbacksAndMessages(null); }
@@ -185,9 +188,13 @@ public final class BleController {
         temperature=find(ENV, TEMP); humidity=find(ENV, HUMID); revision=find(INFO, VERSION);
         control=find(OTA, CONTROL); data=find(OTA, DATA);
         period=find(SETTINGS, PERIOD);
+        battery=find(BATTERY, BATTERY_LEVEL);
+        if (battery != null && (battery.getProperties() & BluetoothGattCharacteristic.PROPERTY_READ) == 0) battery=null;
         if (temperature == null || humidity == null) { fail("This device does not provide temperature and humidity."); return; }
         read(temperature); read(humidity);
         subscribe(temperature); subscribe(humidity);
+        if (battery != null) read(battery);
+        else listener.battery(-1);
         if (revision != null) enqueue(new Op(Kind.READ, revision, null, null, bytes -> {
             version=new String(bytes, StandardCharsets.UTF_8).trim();
         }));
@@ -214,9 +221,10 @@ public final class BleController {
         try {
             if (c.getUuid().equals(TEMP)) listener.reading(true, SensorCodec.temperature(bytes));
             else if (c.getUuid().equals(HUMID)) listener.reading(false, SensorCodec.humidity(bytes));
+            else if (c.getUuid().equals(BATTERY_LEVEL)) listener.battery(SensorCodec.batteryLevel(bytes));
         } catch (IllegalArgumentException e) { listener.message(e.getMessage()); }
     }
-    public void refresh() { if (ready && !isUpdating()) { read(temperature); read(humidity); } }
+    public void refresh() { if (ready && !isUpdating()) { read(temperature); read(humidity); if (battery != null) read(battery); } }
     private void readPeriod() {
         enqueue(new Op(Kind.READ, period, null, null, bytes -> {
             try { listener.reportingPeriod(true, SensorCodec.decodePeriodSeconds(bytes)); }
@@ -310,6 +318,10 @@ public final class BleController {
         main.removeCallbacks(operationTimeout);
         Op finished=current; current=null;
         if (status != BluetoothGatt.GATT_SUCCESS) {
+            // Battery is optional: an unavailable level must not disable monitoring or OTA.
+            if (kind == Kind.READ && BATTERY_LEVEL.equals(characteristic)) {
+                listener.battery(-1); startNext(); return;
+            }
             fail("Bluetooth " + kind.name().toLowerCase(Locale.ROOT) + " failed (" + status + "). Reconnect and retry."); return;
         }
         finished.done.accept(value);

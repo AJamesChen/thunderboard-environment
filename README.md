@@ -1,4 +1,4 @@
-# Thunderboard Environment
+# James's Thunderboard
 
 A Silicon Labs Thunderboard BG22 environment monitor with a native Android app.
 The onboard Si7021 measures temperature and relative humidity; Bluetooth LE
@@ -8,13 +8,40 @@ Internet permission is required by the app.
 Target board: **BRD4184A revision A02 / EFR32BG22C224F512IM40**.
 The app supports Android 12 and later, including Pixel 7 and Pixel 7 Pro.
 
-**Current status:** sensor firmware and desktop BLE reads/notifications are
-verified. The Android APK builds, passes lint, installs, reads both sensors, and
-changes the reporting period with BLE readback confirmation on the Pixel.
-OTA is experimental: interrupted-upload recovery passes, but full desktop
-uploads still fail intermittently with ATT error `0x0e`. Complete phone OTA
-installation remains unverified.
-Use USB provisioning for dependable firmware installation until this is resolved.
+**Current status:** the Kotlin app (version 1.2) builds and passes Android lint
+and portable battery/sensor/protocol tests. Earlier Android hardware validation
+confirmed sensor reads and reporting-period changes on the Pixel; the new Kotlin
+screens still need on-device testing. Sensor firmware and desktop BLE
+reads/notifications are verified. OTA is experimental: interrupted-upload recovery
+passes, but full desktop uploads still fail intermittently with ATT error `0x0e`.
+Complete phone OTA installation remains unverified. Use USB provisioning for
+dependable firmware installation until this is resolved.
+
+## Main screen reference
+
+<img src="docs/images/monitor-design-reference.png" alt="Proposed Climate Monitor design with a connected board, temperature and humidity cards, history chart, and bottom navigation" width="360">
+
+*User-supplied proposed design with sample readings, not a screenshot captured
+from the implemented app or evidence of board behavior.* The implemented UI now
+uses **James's Thunderboard** branding and follows this green-and-white layout.
+The board label in the mockup is illustrative; this project's target is BRD4184A
+A02. The status bar battery belongs to the phone, not the BG22.
+
+## Android app features
+
+| Screen | Implemented behavior |
+| --- | --- |
+| Monitor | BLE discovery/connect/disconnect, live temperature and humidity, manual reads, stale status, and up to one hour of real session history |
+| Update | Package selection and validation, confirmation, experimental OTA progress, and reconnect/version confirmation |
+| Settings / Configure | Reporting-period readback, per-board label stored on the phone, and keep-screen-on preference |
+| About | App version, board and sensor information, and firmware capability details |
+
+The current board firmware does not expose battery, sleep, or reboot commands.
+The app shows battery as unavailable and disables sleep/reboot with an explanation.
+Standard Battery Service support is implemented for compatible future firmware.
+History starts empty and uses received readings; it clears when switching boards
+or restarting the app process. See the [Android guide](android/README.md) for
+build instructions and the Pixel 7 test checklist.
 
 ## Use the Android app
 
@@ -27,7 +54,7 @@ Use USB provisioning for dependable firmware installation until this is resolved
 
 ### Choose an update period
 
-With firmware 4 or newer, use **Update period** in the Environment card:
+With firmware 4 or newer, open **Settings** and use **Sensor reporting**:
 
 1. Enter a whole number from **1 to 3,600 seconds**.
 2. Tap **Apply period**.
@@ -55,7 +82,7 @@ receive these updates.
 
 1. Build a new firmware version, for example `python3 firmware/build.py --version 4`.
 2. Copy `firmware/artifacts/firmware-4.bg22ota` to the phone's Downloads folder.
-3. Connect to the board in BG22 Monitor and tap **Choose update file**.
+3. Connect to the board in BG22 Monitor, open **Update**, and tap **Choose update file**.
 4. Select the package, tap **Update firmware**, and confirm.
 5. Keep the app open and the board powered while it transfers, verifies,
    installs, and reconnects. Success is shown only after the reported firmware
@@ -83,9 +110,11 @@ cd android
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-The APK is a debug-signed personal development build. Source uses the platform
-Android APIs without third-party runtime libraries. Gradle 8.14.3 and Android
-Gradle Plugin 8.6.1 are pinned in the build configuration.
+The APK is a debug-signed personal development build. The Kotlin interface uses
+platform Android views and reuses the Java BLE and protocol code. Gradle 8.14.3,
+Android Gradle Plugin 8.6.1, and Kotlin 2.1.20 are pinned in the build configuration.
+The launcher name remains **BG22 Monitor**; the app's UI branding is
+**James's Thunderboard**.
 
 ## Build and provision firmware
 

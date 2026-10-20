@@ -31,6 +31,11 @@ public final class ProtocolTest {
         return out.toByteArray();
     }
     public static void main(String[] args) throws Exception {
+        assert SensorCodec.batteryLevel(new byte[]{0})==0;
+        assert SensorCodec.batteryLevel(new byte[]{86})==86;
+        assert SensorCodec.batteryLevel(new byte[]{100})==100;
+        for (byte[] invalid:new byte[][]{null,new byte[0],new byte[]{1,0},new byte[]{101},new byte[]{(byte)0xff}})
+            assert SensorCodec.batteryLevel(invalid)==-1;
         assert Math.abs(SensorCodec.temperature(new byte[]{0x76,0x0b})-29.34)<0.0001;
         assert Math.abs(SensorCodec.temperature(new byte[]{0x2d,(byte)0xfb})+12.35)<0.0001;
         assert Math.abs(SensorCodec.humidity(new byte[]{0x48,0x10})-41.68)<0.0001;
@@ -71,6 +76,6 @@ public final class ProtocolTest {
         rejects(zip(entries));
         entries=entries(valid); entries.put("application.gbl",new byte[OtaImage.SLOT_SIZE+1]); rejects(zip(entries));
         entries=entries(valid); entries.put("../unexpected",new byte[0]); rejects(zip(entries));
-        System.out.println("PASS: sensor decoding, GBL package, board/version matching, checksums, corruption, size, and ZIP entry restrictions");
+        System.out.println("PASS: battery/sensor decoding, GBL package, board/version matching, checksums, corruption, size, and ZIP entry restrictions");
     }
 }
